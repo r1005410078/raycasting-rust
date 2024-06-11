@@ -8,6 +8,8 @@ use web_sys::CanvasRenderingContext2d;
 
 type DrawFn = Rc<RefCell<dyn FnMut() + 'static>>;
 
+pub type KeyBoard = Rc<RefCell<dyn FnMut(&str) + 'static>>;
+
 pub static mut CANVAS: Lazy<Option<web_sys::HtmlCanvasElement>> = Lazy::new(|| None);
 
 pub fn create_offset_canvas() {
@@ -44,13 +46,17 @@ pub fn get_content() -> CanvasRenderingContext2d {
 
 pub struct Canvas {
     pub draw: DrawFn,
+    pub key_down: KeyBoard,
+    pub key_up: KeyBoard,
 }
 
 impl Canvas {
-    pub fn new(draw: DrawFn) -> Self {
+    pub fn new(draw: DrawFn, key_down: KeyBoard, key_up: KeyBoard) -> Self {
         Canvas {
             // context: None,
             draw: draw,
+            key_down: key_down,
+            key_up: key_up,
         }
     }
 
@@ -74,6 +80,31 @@ impl Canvas {
         let g = f.clone();
 
         let draw = self.draw.clone();
+        let key_down = self.key_down.clone();
+        let key_up = self.key_up.clone();
+
+        let keydown = Closure::<dyn FnMut(_)>::new(move |event: web_sys::KeyboardEvent| {
+            let key = event.key().to_uppercase();
+            let key = key.as_str();
+            key_down.borrow_mut()(key);
+        });
+
+        let keyup = Closure::<dyn FnMut(_)>::new(move |event: web_sys::KeyboardEvent| {
+            let key = event.key().to_uppercase();
+            let key = key.as_str();
+            key_up.borrow_mut()(key);
+        });
+
+        document
+            .add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref())
+            .unwrap();
+
+        document
+            .add_event_listener_with_callback("keyup", keyup.as_ref().unchecked_ref())
+            .unwrap();
+
+        keyup.forget();
+        keydown.forget();
 
         *g.borrow_mut() = Some(Closure::new(move || {
             // Set the body's text content to how many times this
@@ -103,7 +134,7 @@ pub fn request_animation_frame(f: &Closure<dyn FnMut()>) {
 
 pub fn clear() {
     let content = get_content();
-    // content.clear_rect(0.0, 0.0, 600.0, 800.0);
+    content.clear_rect(0.0, 0.0, 600.0, 800.0);
 }
 
 pub fn fill(color: &str) {
