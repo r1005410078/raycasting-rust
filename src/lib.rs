@@ -12,9 +12,14 @@ const MAP_NUM_ROWS: usize = 11;
 const MAP_NUM_COLS: usize = 15;
 const MAP_WIDTH: f64 = MAP_NUM_COLS as f64 * PIXEL_SIZE;
 const MAP_HEIGHT: f64 = MAP_NUM_ROWS as f64 * PIXEL_SIZE;
+// 墙的宽度
+const WALL_WIDTH: f64 = 1.0;
+// 视角
+const VIEW_ANGLE: f64 = 60.0 * (PI / 180.0);
 
 static GRID: Lazy<Grid> = Lazy::new(|| Grid::new());
 static mut PLAYER: Lazy<Player> = Lazy::new(|| Player::new());
+static mut RAYS: Lazy<Vec<Ray>> = Lazy::new(|| Vec::new());
 
 struct Grid {
     grid: Vec<Vec<u8>>,
@@ -66,6 +71,7 @@ impl Grid {
                 } else {
                     fill("rgba(255, 255, 255, 1)");
                 }
+
                 stroke("black");
             }
         }
@@ -90,7 +96,7 @@ impl Player {
         Self {
             x: MAP_HEIGHT / 2.0,
             y: MAP_HEIGHT / 2.0,
-            ray_radius: 90.0 * (PI / 180.0),
+            ray_radius: -90.0 * (PI / 180.0),
             moving_speed: 1.0,
             turning_speed: 3.0 * (PI / 180.0),
             direction: 0,
@@ -124,6 +130,78 @@ impl Player {
         stroke("red");
         circle(self.x, self.y, 3.0);
         fill("red");
+
+        // 偏移角度、
+        unsafe {
+            RAYS.clear();
+            let mut angle = PLAYER.ray_radius - VIEW_ANGLE / 2.0;
+            let angle_step = VIEW_ANGLE / MAP_WIDTH as f64;
+
+            for _column_id in 0..1 as usize {
+                let mut ray = Ray::new(angle);
+                ray.cast();
+
+                RAYS.push(ray);
+
+                angle += angle_step;
+            }
+        }
+    }
+}
+
+struct Ray {
+    // 角度
+    angle: f64,
+    wall_x: f64,
+    wall_y: f64,
+}
+
+impl Ray {
+    fn new(angle: f64) -> Self {
+        Self {
+            angle,
+            wall_x: 0.0,
+            wall_y: 0.0,
+        }
+    }
+
+    unsafe fn cast(&mut self) {
+        let steep_y = PIXEL_SIZE;
+        let mut inspect_y = (PLAYER.y / PIXEL_SIZE).floor() * PIXEL_SIZE;
+        let mut inspect_x = PLAYER.x + self.angle.tan() / (PLAYER.y - inspect_y);
+
+        let is_down = self.angle > 0.0 && self.angle < PI;
+        let is_up = self.angle > PI || self.angle < PI / 2.0;
+
+        loop {
+            let y = inspect_y + steep_y * (if is_down { 1.0 } else { -1.0 });
+            let x = inspect_x + self.angle.tan() / steep_y;
+
+            if GRID.has_wall(x, y) {
+                break;
+            }
+
+            inspect_y = y;
+            inspect_x = x;
+        }
+
+        console::log_1(&format!("angle: {}", self.angle.to_degrees()).into());
+
+        self.wall_x = inspect_x;
+        self.wall_y = inspect_y;
+    }
+
+    fn render(&self) {
+        unsafe {
+            line(
+                PLAYER.x,
+                PLAYER.y,
+                self.wall_x,
+                self.wall_y,
+                // PLAYER.x + self.angle.cos() * 30.0,
+                // PLAYER.y + self.angle.sin() * 30.0,
+            );
+        }
     }
 }
 
@@ -147,11 +225,18 @@ fn draw() {
     clear();
 
     GRID.render();
+
     unsafe {
         PLAYER.render();
     }
 
     update();
+
+    unsafe {
+        for ray in RAYS.iter() {
+            ray.render();
+        }
+    }
 }
 
 fn key_down(key: &str) {
