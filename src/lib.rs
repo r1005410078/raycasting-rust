@@ -96,7 +96,7 @@ impl Player {
         Self {
             x: MAP_HEIGHT / 2.0,
             y: MAP_HEIGHT / 2.0,
-            ray_radius: -90.0 * (PI / 180.0),
+            ray_radius: 354.0 * (PI / 180.0),
             moving_speed: 1.0,
             turning_speed: 3.0 * (PI / 180.0),
             direction: 0,
@@ -127,9 +127,9 @@ impl Player {
             self.x + self.ray_radius.cos() * 20.0,
             self.y + self.ray_radius.sin() * 20.0,
         );
-        stroke("red");
+        stroke("blue");
         circle(self.x, self.y, 3.0);
-        fill("red");
+        fill("blue");
 
         // 偏移角度、
         unsafe {
@@ -137,7 +137,7 @@ impl Player {
             let mut angle = PLAYER.ray_radius - VIEW_ANGLE / 2.0;
             let angle_step = VIEW_ANGLE / MAP_WIDTH as f64;
 
-            for _column_id in 0..1 as usize {
+            for _column_id in 0..MAP_WIDTH as usize {
                 let mut ray = Ray::new(angle);
                 ray.cast();
 
@@ -151,44 +151,185 @@ impl Player {
 
 struct Ray {
     // 角度
-    angle: f64,
+    ray_angle: f64,
+    distance: f64,
+    is_ray_facing_down: bool,
+    is_ray_facing_up: bool,
+    is_ray_facing_left: bool,
+    is_ray_facing_right: bool,
     wall_x: f64,
     wall_y: f64,
 }
 
 impl Ray {
     fn new(angle: f64) -> Self {
+        let ray_angle = normalize_angle(angle);
+        let is_ray_facing_down = ray_angle >= 0.0 && ray_angle <= PI;
+        let is_ray_facing_up = !is_ray_facing_down;
+        let is_ray_facing_right = ray_angle < 0.5 * PI || ray_angle > 1.5 * PI;
+        let is_ray_facing_left = !is_ray_facing_right;
+
+        // console::log_1(&JsValue::from(
+        //     format!(
+        //         "is_ray_facing_down: {}, is_ray_facing_up: {}, is_ray_facing_left: {}, is_ray_facing_right: {}",
+        //         is_ray_facing_down,
+        //         is_ray_facing_up,
+        //         is_ray_facing_left,
+        //         is_ray_facing_right
+        //     ).as_str()
+        // ));
+
         Self {
-            angle,
+            ray_angle,
+            distance: 0.0,
+            is_ray_facing_down,
+            is_ray_facing_up,
+            is_ray_facing_left,
+            is_ray_facing_right,
             wall_x: 0.0,
             wall_y: 0.0,
         }
     }
 
     unsafe fn cast(&mut self) {
-        let steep_y = PIXEL_SIZE;
-        let mut inspect_y = (PLAYER.y / PIXEL_SIZE).floor() * PIXEL_SIZE;
-        let mut inspect_x = PLAYER.x + self.angle.tan() / (PLAYER.y - inspect_y);
+        let mut xinstercept = 0.0;
+        let mut yinstercept = 0.0;
+        let mut xsteep = 0.0;
+        let mut ysteep = 0.0;
 
-        let is_down = self.angle > 0.0 && self.angle < PI;
-        let is_up = self.angle > PI || self.angle < PI / 2.0;
+        let mut found_horz_wallhit = false;
+        let mut horz_wall_hit_x = 0.0;
+        let mut horz_wall_hit_y = 0.0;
 
-        loop {
-            let y = inspect_y + steep_y * (if is_down { 1.0 } else { -1.0 });
-            let x = inspect_x + self.angle.tan() / steep_y;
-
-            if GRID.has_wall(x, y) {
-                break;
-            }
-
-            inspect_y = y;
-            inspect_x = x;
+        yinstercept = (PLAYER.y / PIXEL_SIZE).floor() * PIXEL_SIZE;
+        if self.is_ray_facing_down {
+            yinstercept += PIXEL_SIZE;
         }
 
-        console::log_1(&format!("angle: {}", self.angle.to_degrees()).into());
+        xinstercept = PLAYER.x + (yinstercept - PLAYER.y) / self.ray_angle.tan();
 
-        self.wall_x = inspect_x;
-        self.wall_y = inspect_y;
+        ysteep = PIXEL_SIZE;
+        if self.is_ray_facing_up {
+            ysteep *= -1.0;
+        }
+
+        xsteep = PIXEL_SIZE / self.ray_angle.tan();
+
+        if self.is_ray_facing_up {
+            xsteep *= -1.0;
+        }
+
+        // if xsteep > 0.0 && self.is_ray_facing_left {
+        //     xinstercept *= -1.0;
+        // }
+
+        // if xsteep < 0.0 && self.is_ray_facing_right {
+        //     xinstercept *= -1.0;
+        // }
+
+        let mut next_horz_touch_x = xinstercept;
+        let mut next_horz_touch_y = yinstercept;
+
+        while horz_wall_hit_x >= 0.0
+            || horz_wall_hit_x <= MAP_WIDTH
+            || horz_wall_hit_y >= 0.0
+            || horz_wall_hit_y <= MAP_HEIGHT
+        {
+            if self.is_ray_facing_up {
+                next_horz_touch_y -= 1.0;
+            }
+
+            if GRID.has_wall(next_horz_touch_x, next_horz_touch_y) {
+                found_horz_wallhit = true;
+
+                horz_wall_hit_x = next_horz_touch_x;
+                horz_wall_hit_y = next_horz_touch_y;
+                break;
+            } else {
+                next_horz_touch_x += xsteep;
+                next_horz_touch_y += ysteep;
+            }
+        }
+
+        let mut found_vert_wallhit = false;
+        let mut vert_wall_hit_x = 0.0;
+        let mut vert_wall_hit_y = 0.0;
+
+        xinstercept = (PLAYER.x / PIXEL_SIZE).floor() * PIXEL_SIZE;
+
+        if self.is_ray_facing_right {
+            xinstercept += PIXEL_SIZE;
+        }
+
+        yinstercept = PLAYER.y + (xinstercept - PLAYER.x) * self.ray_angle.tan();
+
+        xsteep = PIXEL_SIZE;
+        if self.is_ray_facing_left {
+            xsteep *= -1.0;
+        }
+
+        ysteep = PIXEL_SIZE * self.ray_angle.tan();
+
+        if self.is_ray_facing_down && ysteep < 0.0 {
+            ysteep *= -1.0;
+        }
+
+        if self.is_ray_facing_up && ysteep > 0.0 {
+            ysteep *= -1.0;
+        }
+
+        let mut next_vert_touch_x = xinstercept;
+        let mut next_vert_touch_y = yinstercept;
+
+        while vert_wall_hit_x >= 0.0
+            || vert_wall_hit_x <= MAP_WIDTH
+            || vert_wall_hit_y >= 0.0
+            || vert_wall_hit_y <= MAP_HEIGHT
+        {
+            if self.is_ray_facing_left {
+                next_vert_touch_x -= 1.0;
+            }
+
+            if GRID.has_wall(next_vert_touch_x, next_vert_touch_y) {
+                found_vert_wallhit = true;
+
+                vert_wall_hit_x = next_vert_touch_x;
+                vert_wall_hit_y = next_vert_touch_y;
+                break;
+            } else {
+                next_vert_touch_x += xsteep;
+                next_vert_touch_y += ysteep;
+            }
+        }
+
+        let horz_hit_distance = if found_horz_wallhit {
+            distance_between_points(PLAYER.x, PLAYER.y, horz_wall_hit_x, horz_wall_hit_y)
+        } else {
+            std::f64::MAX
+        };
+
+        let vert_hit_distance = if found_vert_wallhit {
+            distance_between_points(PLAYER.x, PLAYER.y, vert_wall_hit_x, vert_wall_hit_y)
+        } else {
+            std::f64::MAX
+        };
+
+        self.wall_x = if horz_hit_distance < vert_hit_distance {
+            horz_wall_hit_x
+        } else {
+            vert_wall_hit_x
+        };
+
+        self.wall_y = if horz_hit_distance < vert_hit_distance {
+            horz_wall_hit_y
+        } else {
+            vert_wall_hit_y
+        };
+
+        // console::log_1(&JsValue::from(format!(
+        //     "tan: {} ray_angle: {}",
+        //     horz_wall_hit_x, horz_wall_hit_y
+        // )));
     }
 
     fn render(&self) {
@@ -201,6 +342,8 @@ impl Ray {
                 // PLAYER.x + self.angle.cos() * 30.0,
                 // PLAYER.y + self.angle.sin() * 30.0,
             );
+            fill("red");
+            stroke("red");
         }
     }
 }
@@ -261,4 +404,18 @@ fn key_up(key: &str) {
             _ => (),
         }
     }
+}
+
+fn normalize_angle(angle: f64) -> f64 {
+    let mut angle = angle % (2.0 * PI);
+
+    if angle < 0.0 {
+        angle = 2.0 * PI + angle
+    }
+
+    angle
+}
+
+fn distance_between_points(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    return ((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)).sqrt();
 }
